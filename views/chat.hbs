@@ -1,0 +1,196 @@
+<div class="chat-container">
+    <div class="chat-header">
+        <div class="chat-header-info">
+            <div class="chat-avatar" id="chatPartnerAvatar">
+                {{substr withUser 0 1}}
+            </div>
+            <div class="chat-details">
+                <h1>{{withUser}}</h1>
+                <div class="chat-status">
+                    <span class="status-dot online"></span>
+                    <span id="statusText">В сети</span>
+                </div>
+            </div>
+        </div>
+        <a href="/users?sessionId={{sessionId}}" class="btn btn-back">← Назад</a>
+    </div>
+
+    <div class="messages-container" id="messages">
+        <div class="empty-state" id="emptyState">
+            <div style="font-size: 4rem; opacity: 0.5; margin-bottom: 20px;">💬</div>
+            <h3>Начать общение</h3>
+            <p>Отправьте сообщение пользователю "{{withUser}}"</p>
+        </div>
+    </div>
+
+    <div class="message-input-container">
+        <input type="text" id="messageInput" class="message-input" placeholder="Введите ваше сообщение здесь..." autocomplete="off">
+        <button id="sendBtn" class="send-btn">↑</button>
+    </div>
+</div>
+
+<script>
+    const currentUser = "{{currentUser}}";
+    const withUser = "{{withUser}}";
+    const sessionId = "{{sessionId}}";
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = window.location.host;
+    const wsUrl = `${wsProtocol}//${wsHost}`;
+
+    const ws = new WebSocket(wsUrl);
+    let isWsConnected = false;
+
+    function getFirstLetter(str) {
+        return str ? str.charAt(0).toUpperCase() : '?';
+    }
+
+    function formatTime(timestamp) {
+        const date = new Date(timestamp);
+        return date.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+    }
+
+    function hideEmptyState() {
+        const emptyState = document.getElementById('emptyState');
+        if (emptyState) {
+            emptyState.style.display = 'none';
+        }
+    }
+
+    function initWebSocket() {
+        ws.onopen = () => {
+            console.log('Подключено к WebSocket для чата.');
+            isWsConnected = true;
+            ws.send(JSON.stringify({
+                type: 'register',
+                from: currentUser
+            }));
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'message' && data.from === withUser) {
+                    hideEmptyState();
+                    addMessage(data.from, data.text, data.timestamp, false);
+                }
+            } catch (error) {
+                console.error('Ошибка при разборе сообщения WebSocket:', error);
+            }
+        };
+
+        ws.onerror = (error) => {
+            console.error('Ошибка WebSocket:', error);
+            isWsConnected = false;
+        };
+
+        ws.onclose = () => {
+            console.log('Соединение WebSocket закрыто.');
+            isWsConnected = false;
+
+            const statusText = document.getElementById('statusText');
+            const statusDot = document.querySelector('.chat-status .status-dot');
+            if (statusText) statusText.textContent = 'Не в сети';
+            if (statusDot) statusDot.classList.remove('online');
+
+            setTimeout(() => {
+                console.log('Попытка повторного подключения WebSocket...');
+                initWebSocket();
+            }, 3000);
+        };
+    }
+
+    function addMessage(from, text, timestamp, isSent) {
+        const messagesDiv = document.getElementById('messages');
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${isSent ? 'sent' : 'received'}`;
+
+        const sender = isSent ? 'Вы' : from;
+        const time = formatTime(timestamp);
+
+        messageDiv.innerHTML = `
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="message-sender">${sender}</span>
+                    <span class="message-time">| ${time}</span>
+                </div>
+                <div class="message-text">${text}</div>
+            </div>
+        `;
+
+        messagesDiv.appendChild(messageDiv);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function sendMessage() {
+        const input = document.getElementById('messageInput');
+        const text = input.value.trim();
+
+        if (!text) return;
+
+        if (isWsConnected && ws) {
+            const message = {
+                type: 'message',
+                from: currentUser,
+                to: withUser,
+                text: text,
+                timestamp: Date.now()
+            };
+
+            ws.send(JSON.stringify(message));
+            hideEmptyState();
+            addMessage(currentUser, text, Date.now(), true);
+            input.value = '';
+            input.focus();
+        } else {
+            alert('Соединение потеряно. Попытка переподключения....');
+            initWebSocket();
+        }
+    }
+
+    async function loadMessages() {
+        try {
+            const response = await fetch(`/api/messages?sessionId=${sessionId}&with=${withUser}`);
+            if (!response.ok) {
+                throw new Error(`Ошибка HTTP! статус: ${response.status}`);
+            }
+            const messages = await response.json();
+
+            if (messages.length > 0) {
+                hideEmptyState();
+
+                messages.forEach(msg => {
+                    const isSent = msg.from === currentUser;
+                    addMessage(msg.from, msg.text, new Date(msg.timestamp).getTime(), isSent);
+                });
+            }
+
+            console.log(`Загрузка ${messages.length} сообщения(ий)`);
+        } catch (error) {
+            console.error('Ошибка загрузки сообщений:', error);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const partnerAvatar = document.getElementById('chatPartnerAvatar');
+        if (partnerAvatar) {
+            partnerAvatar.textContent = getFirstLetter(withUser);
+        }
+
+        initWebSocket();
+        loadMessages();
+
+        document.getElementById('sendBtn').addEventListener('click', sendMessage);
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        document.getElementById('messageInput').focus();
+    });
+</script>

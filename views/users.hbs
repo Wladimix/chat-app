@@ -1,0 +1,119 @@
+<div class="users-container">
+    <div class="users-header">
+        <h1>👋 Добро пожаловать, <span class="current-user">{{currentUser}}</span>!</h1>
+        <p>Выберите пользователя ниже, чтобы начать чат.</p>
+    </div>
+
+    <div class="users-list">
+        <h2>👥 Пользователи</h2>
+
+        {{#if users.length}}
+            {{#each users}}
+                <div class="user-item {{#if online}}online{{else}}offline{{/if}}">
+                    <div class="user-info">
+                        <div class="user-avatar">
+                            {{substr this.login 0 1}}
+                        </div>
+                        <div class="user-details">
+                            <span class="user-login">{{this.login}}</span>
+                            <span class="user-status">
+                                <span class="status-dot {{#if online}}online{{else}}offline{{/if}}"></span>
+                                {{#if online}}В сети{{else}}Не в сети{{/if}}
+                            </span>
+                        </div>
+                    </div>
+                    {{#if online}}
+                        <a href="/chat?sessionId={{../sessionId}}&with={{this.login}}" class="chat-btn">
+                            💬 Чат
+                        </a>
+                    {{/if}}
+                </div>
+            {{/each}}
+        {{else}}
+            <div class="empty-state">
+                <div style="font-size: 4rem; opacity: 0.5; margin-bottom: 20px;">👥</div>
+                <h3>Других пользователей пока нет</h3>
+                <p>Пригласите друзей первыми или подождите, пока присоединятся другие.</p>
+            </div>
+        {{/if}}
+    </div>
+
+    <div class="actions-container">
+        <a href="/logout?sessionId={{sessionId}}" class="btn btn-logout">🚪 Выйти</a>
+    </div>
+</div>
+
+<script>
+    const sessionId = "{{sessionId}}";
+    const currentUser = "{{currentUser}}";
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = window.location.host;
+
+    function getFirstLetter(str) {
+        return str ? str.charAt(0).toUpperCase() : '?';
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.user-avatar').forEach(avatar => {
+            const login = avatar.closest('.user-item').querySelector('.user-login').textContent;
+            avatar.textContent = getFirstLetter(login);
+        });
+    });
+
+    const ws = new WebSocket(`${wsProtocol}//${wsHost}`);
+
+    ws.onopen = () => {
+        console.log('Подключено к WebSocket для получения обновлений статуса.');
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'user_status') {
+                const userItems = document.querySelectorAll('.user-item');
+                userItems.forEach(item => {
+                    const loginElement = item.querySelector('.user-login');
+                    if (loginElement && loginElement.textContent === data.user) {
+                        const statusElement = item.querySelector('.user-status');
+                        const statusDot = item.querySelector('.status-dot');
+                        const chatBtn = item.querySelector('.chat-btn');
+
+                        if (data.online) {
+                            item.classList.add('online');
+                            item.classList.remove('offline');
+                            statusElement.innerHTML = '<span class="status-dot online"></span> В сети';
+
+                            if (!chatBtn) {
+                                const newChatBtn = document.createElement('a');
+                                newChatBtn.href = `/chat?sessionId=${sessionId}&with=${data.user}`;
+                                newChatBtn.className = 'chat-btn';
+                                newChatBtn.innerHTML = '💬 Чат';
+                                item.appendChild(newChatBtn);
+                            }
+                        } else {
+                            item.classList.add('offline');
+                            item.classList.remove('online');
+                            statusElement.innerHTML = '<span class="status-dot offline"></span> Не в сети';
+
+                            if (chatBtn) {
+                                chatBtn.remove();
+                            }
+                        }
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Ошибка при разборе сообщения WebSocket:', error);
+        }
+    };
+
+    ws.onerror = (error) => {
+        console.error('Ошибка WebSocket:', error);
+    };
+
+    ws.onclose = () => {
+        console.log('Соединение WebSocket закрыто для получения обновлений статуса.');
+    };
+</script>
